@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nebula Dodge</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+/* Custom CSS for Game Aesthetics */
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@700&display=swap');
+
+body {
+font-family: 'Space Mono', monospace;
+background-color: #0d1117; /* Dark space background */
+display: flex;
+justify-content: center;
+align-items: center;
+height: 100vh;
+margin: 0;
+overflow: hidden;
+flex-direction: column;
+}
+
+#game-container {
+display: flex;
+flex-direction: column;
+align-items: center;
+padding: 10px;
+background: #161b22; /* Slightly lighter inner background */
+border: 4px solid #00ffaa; /* Neon border */
+border-radius: 12px;
+box-shadow: 0 0 20px rgba(0, 255, 170, 0.5); /* Neon glow */
+max-width: 95vw;
+max-height: 95vh;
+position: relative;
+}
+
+#game-canvas {
+background-color: #0d1117;
+border-radius: 8px;
+touch-action: none; /* Prevents default touch scrolling */
+}
+
+.game-controls {
+display: flex;
+justify-content: space-between;
+width: 100%;
+margin-top: 15px;
+padding: 0 10px;
+box-sizing: border-box;
+}
+
+.control-button {
+background-color: #00aaff;
+color: #161b22;
+padding: 12px 25px;
+border-radius: 8px;
+font-size: 1.25rem;
+font-weight: bold;
+cursor: pointer;
+box-shadow: 0 4px #0077cc;
+transition: all 0.1s;
+user-select: none;
+flex-grow: 1;
+margin: 0 5px;
+text-align: center;
+}
+
+.control-button:active {
+background-color: #0077cc;
+box-shadow: 0 0 #0077cc;
+transform: translateY(4px);
+}
+
+#score-display {
+position: absolute;
+top: 15px;
+left: 22px;
+color: #00ffaa;
+font-size: 1.2rem;
+text-shadow: 0 0 5px #00ffaa;
+z-index: 10;
+line-height: 1.4;
+transition: all 0.1s; /* Ensure transitions are smooth */
+}
+
+/* Level Up Animation Effect */
+@keyframes neonPulse {
+0% { color: #ffffff; text-shadow: 0 0 15px #00ffaa, 0 0 30px #00ffaa; }
+50% { color: #ffcc00; text-shadow: 0 0 10px #ffcc00, 0 0 20px #ffcc00; }
+100% { color: #00ffaa; text-shadow: 0 0 5px #00ffaa, 0 0 10px #00ffaa; }
+}
+
+.level-up-pulse {
+animation: neonPulse 0.5s ease-in-out 2; /* Pulse twice over 1 second */
+}
+
+/* Message Box styles unchanged */
+#message-box {
+position: absolute;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+background: rgba(0, 0, 0, 0.9);
+border: 3px solid #ff55aa;
+border-radius: 10px;
+padding: 25px;
+text-align: center;
+color: #ff55aa;
+z-index: 20;
+box-shadow: 0 0 15px rgba(255, 85, 170, 0.8);
+display: none; /* Hidden by default */
+}
+
+#message-box h2 {
+font-size: 2rem;
+margin-bottom: 10px;
+}
+
+#message-box p {
+margin-bottom: 20px;
+font-size: 1rem;
+}
+
+#restart-button {
+background-color: #ff55aa;
+color: #161b22;
+padding: 10px 20px;
+border-radius: 6px;
+cursor: pointer;
+font-size: 1rem;
+font-weight: bold;
+box-shadow: 0 3px #cc4488;
+}
+
+#restart-button:active {
+background-color: #cc4488;
+box-shadow: 0 0 #cc4488;
+transform: translateY(3px);
+}
+</style>
+</head>
+<body>
+
+<div id="game-container">
+<!-- Display will now show Level and Score -->
+<div id="score-display">Level: 1 <br> Score: 0</div>
+<canvas id="game-canvas"></canvas>
+
+<div id="message-box">
+<h2>MISSION FAILED</h2>
+<p id="final-score">Your final score was: 0</p>
+<button id="restart-button">RESTART MISSION</button>
+</div>
+
+<div class="game-controls md:hidden">
+<button class="control-button" id="left-button">← LEFT</button>
+<button class="control-button" id="right-button">RIGHT →</button>
+</div>
+</div>
+
+<script>
+// --- Setup and Initialization ---
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+const scoreDisplay = document.getElementById('score-display');
+const messageBox = document.getElementById('message-box');
+const finalScoreText = document.getElementById('final-score');
+const restartButton = document.getElementById('restart-button');
+const leftButton = document.getElementById('left-button');
+const rightButton = document.getElementById('right-button');
+
+let gameLoopId;
+let particleLoopId;
+let lastTime = 0;
+let gameRunning = false;
+let score = 0;
+let continuousDifficulty = 1.0;
+let previousLevel = 1;
+
+const KEYS = { LEFT: 'ArrowLeft', RIGHT: 'ArrowRight', A: 'a', D: 'd', SPACE: ' ' };
+let inputState = { left: false, right: false };
+
+const player = {
+x: 0,
+y: 0,
+width: 30, // Width of the collision box
+height: 30, // Height of the collision box
+speed: 5,
+color: '#ff55aa' // Neon Pink
+};
+
+let asteroids = [];
+let particles = [];
+let asteroidSpawnTimer = 0;
+const INITIAL_SPAWN_RATE = 60;
+const PARTICLE_COUNT = 30;
+
+// --- Utility Functions ---
+
+function resizeCanvas() {
+// Fixed aspect ratio (e.g., 4:3 for arcade feel)
+const aspectRatio = 4 / 3;
+let newWidth = Math.min(window.innerWidth * 0.9, 700);
+let newHeight = newWidth / aspectRatio;
+
+// Ensure it fits the screen
+if (newHeight > window.innerHeight * 0.7) {
+newHeight = window.innerHeight * 0.7;
+newWidth = newHeight * aspectRatio;
+}
+
+canvas.width = newWidth;
+canvas.height = newHeight;
+
+// Reposition player
+player.x = (canvas.width - player.width) / 2;
+player.y = canvas.height - player.height - 20;
+}
+
+class Asteroid {
+constructor(canvasWidth, currentDifficulty) {
+this.radius = 10 + Math.random() * 10; // 10 to 20
+this.x = Math.random() * (canvasWidth - this.radius * 2) + this.radius;
+this.y = -this.radius;
+this.speed = 2 + Math.random() * 1.5 + (currentDifficulty * 1.5);
+this.color = '#00ffaa'; // Neon Green
+}
+
+update(deltaTime) {
+this.y += this.speed * deltaTime / 16;
+}
+
+draw(ctx) {
+ctx.fillStyle = this.color;
+ctx.beginPath();
+ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+ctx.fill();
+ctx.closePath();
+
+// Add a glowing effect
+ctx.shadowBlur = 10;
+ctx.shadowColor = this.color;
+ctx.fillStyle = 'white';
+ctx.beginPath();
+ctx.arc(this.x, this.y, this.radius * 0.5, 0, Math.PI * 2);
+ctx.fill();
+ctx.shadowBlur = 0;
+}
+}
+
+class Particle {
+constructor(x, y, color) {
+this.x = x;
+this.y = y;
+this.size = Math.random() * 3 + 1;
+this.color = color;
+this.life = 60;
+this.vx = (Math.random() - 0.5) * 5;
+this.vy = (Math.random() - 0.5) * 5;
+}
+
+update() {
+this.x += this.vx;
+this.y += this.vy;
+this.life--;
+}
+
+draw(ctx) {
+ctx.fillStyle = this.color;
+// Add glow to particles
+ctx.shadowBlur = 5;
+ctx.shadowColor = this.color;
+ctx.fillRect(this.x, this.y, this.size, this.size);
+ctx.shadowBlur = 0;
+}
+}
+
+// --- Drawing Functions ---
+
+function drawPlayer() {
+if (!gameRunning) return;
+
+const pw = player.width;
+const ph = player.height;
+const px = player.x;
+const py = player.y;
+
+// --- 1. Draw Rocket Body and Fins (Neon Pink) ---
+ctx.fillStyle = player.color;
+ctx.shadowBlur = 15;
+ctx.shadowColor = player.color;
+
+ctx.beginPath();
+
+// Nose Cone (Top Point)
+ctx.moveTo(px + pw * 0.5, py);
+
+// Right side of rocket (Nose to Body)
+ctx.lineTo(px + pw * 0.7, py + ph * 0.1);
+
+// Right Body side
+ctx.lineTo(px + pw * 0.7, py + ph * 0.7);
+
+// Right Fin
+ctx.lineTo(px + pw, py + ph * 0.8);
+ctx.lineTo(px + pw * 0.7, py + ph); // Bottom of fin joins body
+
+// Bottom of rocket
+ctx.lineTo(px + pw * 0.3, py + ph);
+
+// Left Fin
+ctx.lineTo(px * 1, py + ph * 0.8);
+ctx.lineTo(px + pw * 0.3, py + ph * 0.7);
+
+// Left Body side
+ctx.lineTo(px + pw * 0.3, py + ph * 0.1);
+
+// Left side of rocket (Body back to Nose)
+ctx.lineTo(px + pw * 0.5, py);
+
+ctx.closePath();
+ctx.fill();
+
+ctx.shadowBlur = 0; // Reset shadow for flame
+
+// --- 2. Draw Engine Flame (Yellow/Orange) ---
+ctx.fillStyle = '#ffcc00';
+ctx.beginPath();
+// Base of flame
+ctx.moveTo(px + pw * 0.35, py + ph);
+ctx.lineTo(px + pw * 0.65, py + ph);
+// Flame point
+ctx.lineTo(px + pw * 0.5, py + ph + 15);
+ctx.closePath();
+ctx.fill();
+
+// Add a flame glow (inner white part)
+ctx.shadowBlur = 10;
+ctx.shadowColor = '#ffcc00';
+ctx.fillStyle = '#ffffff80';
+ctx.beginPath();
+ctx.moveTo(px + pw * 0.4, py + ph);
+ctx.lineTo(px + pw * 0.6, py + ph);
+ctx.lineTo(px + pw * 0.5, py + ph + 10);
+ctx.closePath();
+ctx.fill();
+
+ctx.shadowBlur = 0; // Final shadow reset
+}
+
+function drawAsteroids() {
+asteroids.forEach(asteroid => asteroid.draw(ctx));
+}
+
+function drawParticles() {
+particles.forEach(p => p.draw(ctx));
+}
+
+function draw() {
+// Clear the canvas
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+// Draw a subtle star field (background dots)
+for (let i = 0; i < 50; i++) {
+ctx.fillStyle = `rgba(255, 255, 255, ${Math.random()})`;
+ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1, 1);
+}
+
+drawPlayer();
+drawAsteroids();
+drawParticles();
+}
+
+// --- Game Logic ---
+
+function handleInput() {
+if (inputState.left) {
+player.x = Math.max(0, player.x - player.speed);
+}
+if (inputState.right) {
+player.x = Math.min(canvas.width - player.width, player.x + player.speed);
+}
+}
+
+function updateParticles() {
+particles.forEach(p => p.update());
+particles = particles.filter(p => p.life > 0);
+}
+
+function updateAsteroids(deltaTime) {
+asteroids.forEach(asteroid => asteroid.update(deltaTime));
+
+asteroids = asteroids.filter(asteroid => {
+if (asteroid.y > canvas.height + asteroid.radius) {
+return false;
+}
+
+if (checkCollision(player, asteroid) && gameRunning) {
+endGame();
+return false;
+}
+
+return true;
+});
+
+asteroidSpawnTimer++;
+let currentSpawnRate = INITIAL_SPAWN_RATE / continuousDifficulty;
+
+if (asteroidSpawnTimer > currentSpawnRate) {
+asteroids.push(new Asteroid(canvas.width, continuousDifficulty));
+asteroidSpawnTimer = 0;
+}
+}
+
+function checkCollision(player, asteroid) {
+// Collision check remains the same (center point distance)
+const playerCenterX = player.x + player.width / 2;
+const playerCenterY = player.y + player.height / 2;
+
+const dx = playerCenterX - asteroid.x;
+const dy = playerCenterY - asteroid.y;
+const distance = Math.sqrt(dx * dx + dy * dy);
+
+return distance < asteroid.radius + (player.width * 0.4);
+}
+
+function updateScore(deltaTime) {
+score += deltaTime / 100;
+
+continuousDifficulty = 1.0 + (score / 500);
+
+const currentLevel = 1 + Math.floor(score / 500);
+
+// Check for level change and apply pulse effect
+if (currentLevel > previousLevel) {
+scoreDisplay.classList.add('level-up-pulse');
+setTimeout(() => {
+scoreDisplay.classList.remove('level-up-pulse');
+}, 1000);
+}
+previousLevel = currentLevel;
+
+scoreDisplay.innerHTML = `Level: ${currentLevel} <br> Score: ${Math.floor(score)}`;
+
+player.speed = 5 + (continuousDifficulty * 0.5);
+}
+
+function gameLoop(currentTime) {
+if (!gameRunning) return;
+
+const deltaTime = currentTime - lastTime;
+lastTime = currentTime;
+
+handleInput();
+updateAsteroids(deltaTime);
+updateScore(deltaTime);
+updateParticles();
+draw();
+
+gameLoopId = requestAnimationFrame(gameLoop);
+}
+
+function createExplosion(x, y, color) {
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+particles.push(new Particle(x, y, color));
+}
+}
+
+function startGame() {
+if (gameRunning) return;
+
+// Reset state
+score = 0;
+continuousDifficulty = 1.0;
+previousLevel = 1;
+asteroids = [];
+particles = [];
+player.x = (canvas.width - player.width) / 2;
+player.y = canvas.height - player.height - 20;
+gameRunning = true;
+messageBox.style.display = 'none';
+scoreDisplay.innerHTML = `Level: 1 <br> Score: 0`;
+
+lastTime = performance.now();
+gameLoopId = requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+gameRunning = false;
+cancelAnimationFrame(gameLoopId);
+cancelAnimationFrame(particleLoopId);
+
+// Create explosion at player position
+const centerX = player.x + player.width / 2;
+const centerY = player.y + player.height / 2;
+createExplosion(centerX, centerY, player.color);
+
+// Run a temporary loop just for the particles
+const particleLoop = (time) => {
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+updateParticles();
+drawAsteroids();
+drawParticles();
+
+if (particles.length > 0) {
+particleLoopId = requestAnimationFrame(particleLoop);
+} else {
+// After particles are gone, show the message box
+finalScoreText.textContent = `Your final score was: ${Math.floor(score)}`;
+messageBox.style.display = 'block';
+}
+};
+particleLoopId = requestAnimationFrame(particleLoop);
+}
+
+// --- Event Listeners and Setup ---
+
+// 1. Keyboard Controls
+document.addEventListener('keydown', (e) => {
+if (!gameRunning) {
+if (e.key === KEYS.SPACE) startGame();
+return;
+}
+if (e.key === KEYS.LEFT || e.key === KEYS.A) inputState.left = true;
+if (e.key === KEYS.RIGHT || e.key === KEYS.D) inputState.right = true;
+});
+
+document.addEventListener('keyup', (e) => {
+if (e.key === KEYS.LEFT || e.key === KEYS.A) inputState.left = false;
+if (e.key === KEYS.RIGHT || e.key === KEYS.D) inputState.right = false;
+});
+
+// 2. Button (Touch) Controls
+function setupButton(button, direction) {
+const startMove = () => { inputState[direction] = true; };
+const stopMove = () => { inputState[direction] = false; };
+
+// Mouse/Touch events
+button.addEventListener('mousedown', startMove);
+button.addEventListener('mouseup', stopMove);
+button.addEventListener('mouseleave', stopMove);
+
+button.addEventListener('touchstart', (e) => {
+e.preventDefault();
+startMove();
+});
+button.addEventListener('touchend', stopMove);
+button.addEventListener('touchcancel', stopMove);
+}
+
+setupButton(leftButton, 'left');
+setupButton(rightButton, 'right');
+
+// 3. Restart Button
+restartButton.addEventListener('click', startGame);
+
+// 4. Initial Setup and Resize Handling
+window.addEventListener('resize', resizeCanvas);
+
+// Start game on load
+window.onload = function() {
+resizeCanvas();
+// Show initial "Press Space" or "Tap to Start" message
+finalScoreText.innerHTML = 'Press **SPACE** on desktop or **TAP RESTART** to begin.';
+messageBox.style.display = 'block';
+gameRunning = false;
+};
+</script>
+</body>
+</html>
